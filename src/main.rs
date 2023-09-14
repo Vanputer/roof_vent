@@ -1,3 +1,6 @@
+// sudo adduser <user> dialout
+// sudo chmod a+rw /dev/ttyACM0
+//
 // https://medium.com/@rajeshpachaikani/connect-esp32-to-wifi-with-rust-7d12532f539b
 // https://github.com/esp-rs/std-training/blob/main/intro/http-server/examples/http_server.rs
 // https://esp-rs.github.io/book/
@@ -8,6 +11,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use serde_json;
 use embedded_svc::{http::Method, io::Write};
 use esp_idf_sys as _;
 use esp_idf_hal::{
@@ -50,8 +54,8 @@ fn main(){
     }
     println!("Should be connected now");
 
-    let device = Arc::new(Mutex::new(Device {
-        name: "Roof Vent".to_string(),
+    let roof_vent = Arc::new(Mutex::new(Device {
+        name: "roof vent".to_string(),
         action: Action::Off,
         available_actions: Vec::from([Action::On, Action::Off]),
         default_target: 3,
@@ -61,14 +65,38 @@ fn main(){
         on_duration_ms: 0,
     }));
 
-    // Device Manager
-    let device_clone = device.clone();
+    // roof_vent Manager
+    let roof_vent_clone = roof_vent.clone();
     thread::spawn(move || {
         loop {
             {
-                let mut device = device_clone.lock().unwrap();
-                // Modify the device state or perform operations
-                println!("Device Manager: Current device is {:?}", *device);
+                let mut roof_vent = roof_vent_clone.lock().unwrap();
+                // Modify the roof_vent state or perform operations
+                println!("roof_vent Manager: Current device is {:?}", *roof_vent);
+            }
+                sleep(Duration::from_millis(5000));
+        }
+    });
+
+    let vent_louver = Arc::new(Mutex::new(Device {
+        name: "vent louver".to_string(),
+        action: Action::Off,
+        available_actions: Vec::from([Action::On, Action::Off]),
+        default_target: 3,
+        dutycycles: [0, 20, 40, 60, 80, 100],
+        target: 0,
+        period_ms: 100,
+        on_duration_ms: 0,
+    }));
+    
+    // roof_vent Manager
+    let vent_louver_clone = vent_louver.clone();
+    thread::spawn(move || {
+        loop {
+            {
+                let mut vent_louver = vent_louver_clone.lock().unwrap();
+                // Modify the roof_vent state or perform operations
+                println!("Vent Louver Manager: Current device is {:?}", *vent_louver);
             }
                 sleep(Duration::from_millis(5000));
         }
@@ -83,19 +111,23 @@ fn main(){
                 response.write_all(html.as_bytes())?;
                 Ok(())
             }).unwrap();
-    let device_clone = device.clone();
-    server.fn_handler("/device", Method::Get, move |request| {
-                let device_guard = device_clone.lock().unwrap();
-                let html = device_guard.to_json(); 
+    let roof_vent_clone = roof_vent.clone();
+    let vent_louver_clone = vent_louver.clone();
+    server.fn_handler("/devices", Method::Get, move |request| {
+                let roof_vent_guard = roof_vent_clone.lock().unwrap().clone();
+                let vent_louver_guard = vent_louver_clone.lock().unwrap().clone();
+                let payload = serde_json::json!({roof_vent_guard.name.clone():
+                                              roof_vent_guard,
+                                              vent_louver_guard.name.clone():
+                                              vent_louver_guard});
                 let mut response = request.into_ok_response()?;
-                response.write_all(html.as_bytes())?;
+                response.write_all(payload.to_string().as_bytes())?;
                 Ok(())
             }).unwrap();
     loop{
         println!("IP info: {:?}", wifi_driver.sta_netif().get_ip_info().unwrap());
         sleep(Duration::new(10,0));
     }
-
 }
 
 fn index_html() -> String {
