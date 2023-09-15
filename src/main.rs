@@ -6,6 +6,7 @@
 // https://esp-rs.github.io/book/
 
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     thread,
     thread::sleep,
@@ -25,6 +26,8 @@ use esp_idf_svc::{
 };
 use embedded_svc::wifi::{ClientConfiguration, Wifi, Configuration};
 use esp_idf_svc::http::server::Configuration as SVC_Configuration;
+use querystring;
+
 use device::{ Device, Action };
 
 fn main(){
@@ -122,6 +125,18 @@ fn main(){
                                               vent_louver_guard});
                 let mut response = request.into_ok_response()?;
                 response.write_all(payload.to_string().as_bytes())?;
+                Ok(())
+            }).unwrap();
+    let roof_vent_clone = roof_vent.clone();
+    let vent_louver_clone = vent_louver.clone();
+    server.fn_handler("/set", Method::Get, move |request| {
+                let roof_vent_guard = roof_vent_clone.lock().unwrap();
+                let vent_louver_guard = vent_louver_clone.lock().unwrap();
+                let query = &request.uri()[5..].to_string();
+                let query: HashMap<_, _> = querystring::querify(query).into_iter().collect();
+                println!("_______________________ {:?}", &query);
+                let mut response = request.into_ok_response()?;
+                response.write_all(&format!("{:?}", &query).into_bytes()[..]);
                 Ok(())
             }).unwrap();
     loop{
