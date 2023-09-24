@@ -11,7 +11,8 @@ use embedded_svc::{
     http::Method,
     io::Write,
 };
-use esp_idf_hal::peripherals::Peripherals;
+use esp_idf_hal::delay::Delay;
+use esp_idf_hal::{gpio::*, peripherals::Peripherals};
 use esp_idf_svc::http::server::Configuration as SVC_Configuration;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -74,19 +75,6 @@ fn main() {
         on_duration_ms: 0,
     }));
 
-    // roof_vent Manager
-    let roof_vent_clone = roof_vent.clone();
-    thread::spawn(move || {
-        loop {
-            {
-                let mut roof_vent = roof_vent_clone.lock().unwrap();
-                // Modify the roof_vent state or perform operations
-                println!("roof_vent Manager: Current device is {:?}", *roof_vent);
-            }
-            sleep(Duration::from_millis(5000));
-        }
-    });
-
     let vent_louver = Arc::new(Mutex::new(Device {
         name: "vent louver".to_string(),
         action: Action::Off,
@@ -99,15 +87,75 @@ fn main() {
     }));
 
     // roof_vent Manager
+    let roof_vent_clone = roof_vent.clone();
     let vent_louver_clone = vent_louver.clone();
     thread::spawn(move || {
+        let mut roof_vent_pin = PinDriver::output(peripherals.pins.gpio1).unwrap();
+        let mut was_on = false; //  tracks if the last time through the loop the action was
+                                //  something other than Off
+        let mut is_on = false; //  tracks if the fan pwm signal is (was last cycle) on
+        let mut on_ms = 0;
+        let mut off_ms = 1;
         loop {
             {
-                let mut vent_louver = vent_louver_clone.lock().unwrap();
-                // Modify the roof_vent state or perform operations
-                println!("Vent Louver Manager: Current device is {:?}", *vent_louver);
+                let roof_vent = roof_vent_clone.lock().unwrap();
+                on_ms = roof_vent.on_duration_ms;
+                off_ms = roof_vent.period_ms - on_ms;
             }
-            sleep(Duration::from_millis(5000));
+            // deal with the louver if the fan goes from off to on
+            if !was_on && on_ms > 0 {
+                // deal with startup of the fan
+                roof_vent_pin.set_high();
+                Delay::delay_ms(1000);
+                // and then louver stuff
+                let mut vent_louver = vent_louver_clone.lock().unwrap();
+                vent_louver.take_action(Action::On, None);
+                was_on = true;
+            } else if was_on && on_ms < 1 {
+                // fan goes from on to off
+                let mut vent_louver = vent_louver_clone.lock().unwrap();
+                vent_louver.take_action(Action::Off, None);
+                was_on = false;
+            }
+            if (on_ms > 0 && !is_on) || (off_ms == 0) {
+                roof_vent_pin.set_high();
+                is_on = true;
+                Delay::delay_ms(on_ms);
+            } else {
+                roof_vent_pin.set_low();
+                is_on = false;
+                Delay::delay_ms(off_ms);
+            }
+        }
+    });
+
+    // roof_vent Manager
+    let vent_louver_clone = vent_louver.clone();
+    thread::spawn(move || {
+        let mut drive_open_pin = PinDriver::output(peripherals.pins.gpio2).unwrap();
+        let mut drive_close_pin = PinDriver::output(peripherals.pins.gpio3).unwrap();
+        let mut sensor_open_pin = PinDriver::input(peripherals.pins.gpio4).unwrap();
+        let mut sensor_close_pin = PinDriver::input(peripherals.pins.gpio5).unwrap();
+
+        let mut action = Action::Off;
+        let mut period = 0;
+
+        loop {
+            {
+                let louver = vent_louver_clone.lock().unwrap();
+                action = louver.action;
+                period = louver.period_ms;
+            }
+            while action == Action::On && sensor_open_pin.is_low() {
+                drive_open_pin.set_high();
+                Delay::delay_ms(100);
+            }
+            drive_open_pin.set_low();
+            while action == Action::Off && sensor_close_pin.is_low() {
+                drive_close_pin.set_high();
+                Delay::delay_ms(100);
+            }
+            drive_close_pin.set_low();
         }
     });
 
@@ -206,7 +254,6 @@ fn main() {
             device.take_action(action, target);
             let mut response = request.into_ok_response()?;
             response.write_all(&device.to_json().into_bytes()[..]);
-            //response.write_all(&format!("{:?}", &query).into_bytes()[..]);
             Ok(())
         })
         .unwrap();
@@ -217,6 +264,10 @@ fn main() {
         );
         sleep(Duration::new(10, 0));
     }
+}
+
+fn roof_vent_thread_spawner(vent: Arc<Mutex<Device>>, louver: Arc<Mutex<Device>>, pin1: Gpio1) {
+
 }
 
 fn exit_early<'a>(
@@ -250,3 +301,4 @@ fn templated(content: impl AsRef<str>) -> String {
         content.as_ref()
     )
 }
+
