@@ -69,7 +69,7 @@ fn main() {
             Action::Set,
         ]),
         default_target: 3,
-        dutycycles: [0, 20, 40, 60, 80, 100],
+        dutycycles: [0, 20, 40, 60, 80, 96],
         target: 0,
         period_ms: 100,
         on_duration_ms: 0,
@@ -80,7 +80,7 @@ fn main() {
         action: Action::Off,
         available_actions: Vec::from([Action::On, Action::Off]),
         default_target: 3,
-        dutycycles: [0, 20, 40, 60, 80, 100],
+        dutycycles: [0, 20, 40, 60, 80, 96],
         target: 0,
         period_ms: 100,
         on_duration_ms: 0,
@@ -155,7 +155,9 @@ fn main() {
                 drive_close_pin.set_high();
                 Delay::delay_ms(100);
             }
+            // todo: don't like this
             drive_close_pin.set_low();
+            Delay::delay_ms(100);
         }
     });
 
